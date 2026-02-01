@@ -1,0 +1,1196 @@
+using cAlgo.API;
+using cAlgo.API.Indicators;
+using cAlgo.API.Internals;
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+
+namespace cAlgo.Robots
+{
+    public enum MovingAverageType
+    {
+        EMA,
+        WWS,
+        HMA,
+        SMA,
+        TMA,
+        WMA
+    }
+
+    public enum TrailingStopType
+    {
+        FixedDistance,
+        MovingAverage
+    }
+
+    public enum TPType
+    {
+        Pips,
+        Dollar
+    }
+
+    public enum InnerTimeframeOptions
+    {
+        M1,
+        M5,
+        M15,
+        M30,
+        H1,
+        H4,
+        D1,
+        W1
+    }
+
+    public enum PanelHorizontalPosition
+    {
+        Left,
+        Center,
+        Right
+    }
+
+    public enum PanelVerticalPosition
+    {
+        Top,
+        Middle,
+        Bottom
+    }
+
+    public enum PanelSize
+    {
+        Tiny,
+        Small,
+        Normal,
+        Large
+    }
+
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
+    public class TrendFollower : Robot
+    {
+        [Parameter("Label Prefix", DefaultValue = "HTS", Group = "General Settings")]
+        public string LabelPrefix { get; set; }
+
+        [Parameter("Short Period", DefaultValue = 33, Group = "MA Settings", MinValue = 1)]
+        public int ShortPeriod { get; set; }
+
+        [Parameter("Long Period", DefaultValue = 144, Group = "MA Settings", MinValue = 1)]
+        public int LongPeriod { get; set; }
+
+        [Parameter("Short Period MA Type", DefaultValue = MovingAverageType.WWS, Group = "MA Settings")]
+        public MovingAverageType ShortPeriodMAType { get; set; }
+
+        [Parameter("Long Period MA Type", DefaultValue = MovingAverageType.WWS, Group = "MA Settings")]
+        public MovingAverageType LongPeriodMAType { get; set; }
+
+        [Parameter("Distance from Short MA to Open Position", DefaultValue = 8, Group = "MA Settings", MinValue = 0)]
+        public int DistanceFromShortMAToOpen { get; set; }
+
+        [Parameter("Distance from Long MA to Open Position", DefaultValue = 8, Group = "MA Settings", MinValue = 0)]
+        public int DistanceFromLongMAToOpen { get; set; }
+
+        [Parameter("Use AO Filter", DefaultValue = true, Group = "Additional Filters")]
+        public bool UseAOFilter { get; set; }
+
+        [Parameter("AO Must Be Above Zero for Long, Below Zero for Short", DefaultValue = true, Group = "Additional Filters")]
+        public bool AOMustBeAboveBelowZero { get; set; }
+
+        [Parameter("Use MACD Filter", DefaultValue = false, Group = "Additional Filters")]
+        public bool UseMACDFilter { get; set; }
+
+        [Parameter("MACD Fast Period", DefaultValue = 12, Group = "Additional Filters")]
+        public int MACDFastPeriod { get; set; }
+
+        [Parameter("MACD Slow Period", DefaultValue = 26, Group = "Additional Filters")]
+        public int MACDSlowPeriod { get; set; }
+
+        [Parameter("MACD Signal Period", DefaultValue = 9, Group = "Additional Filters")]
+        public int MACDSignalPeriod { get; set; }
+
+        [Parameter("Use RSI Filter", DefaultValue = false, Group = "Additional Filters")]
+        public bool UseRSIFilter { get; set; }
+
+        [Parameter("RSI Period", DefaultValue = 14, Group = "Additional Filters")]
+        public int RSIPeriod { get; set; }
+
+        [Parameter("RSI Overbought Level", DefaultValue = 70, Group = "Additional Filters", MinValue = 0, MaxValue = 100)]
+        public int RSIOverboughtLevel { get; set; }
+
+        [Parameter("RSI Oversold Level", DefaultValue = 30, Group = "Additional Filters", MinValue = 0, MaxValue = 100)]
+        public int RSIOversoldLevel { get; set; }
+
+        [Parameter("Cool Down Period (Seconds)", DefaultValue = 5, Group = "Additional Filters", MinValue = 1)]
+        public int CoolDownPeriod { get; set; }
+
+        [Parameter("Position Size for Short MA (Lots)", DefaultValue = 0.01, Group = "Position Settings", MinValue = 0.01)]
+        public double PositionSizeShortMA { get; set; }
+
+        [Parameter("Position Size for Long MA (Lots)", DefaultValue = 0.01, Group = "Position Settings", MinValue = 0.01)]
+        public double PositionSizeLongMA { get; set; }
+
+        [Parameter("Max Positions for Short MA", DefaultValue = 2, Group = "Position Settings", MinValue = 1)]
+        public int MaxPositionsShortMA { get; set; }
+
+        [Parameter("Max Positions for Long MA", DefaultValue = 2, Group = "Position Settings", MinValue = 1)]
+        public int MaxPositionsLongMA { get; set; }
+
+        [Parameter("Trailing Stop Distance", DefaultValue = 40, Group = "Stoploss Settings", MinValue = 1)]
+        public int TrailingStopDistance { get; set; }
+
+        [Parameter("Enable Trailing Stop", DefaultValue = false, Group = "Stoploss Settings")]
+        public bool EnableTrailingStop { get; set; }
+
+        [Parameter("Move SL to BE", DefaultValue = true, Group = "Stoploss Settings")]
+        public bool MoveSLToBE { get; set; }
+
+        [Parameter("Distance to Move SL To BE (Pips)", DefaultValue = 50, Group = "Stoploss Settings", MinValue = 1)]
+        public int DistanceToMoveSLToBE { get; set; }
+
+        [Parameter("Trailing Stop Type", DefaultValue = TrailingStopType.FixedDistance, Group = "Stoploss Settings")]
+        public TrailingStopType TrailingStopType { get; set; }
+
+        [Parameter("Trailing Stop MA Type", DefaultValue = MovingAverageType.WWS, Group = "Stoploss Settings")]
+        public MovingAverageType TrailingStopMAType { get; set; }
+
+        [Parameter("Trailing Stop MA Period", DefaultValue = 33, Group = "Stoploss Settings", MinValue = 1)]
+        public int TrailingStopMAPeriod { get; set; }
+
+        [Parameter("Trailing Stop MA Distance (Pips)", DefaultValue = 15, Group = "Stoploss Settings", MinValue = 1)]
+        public int TrailingStopMADistance { get; set; }
+
+        [Parameter("Global SL Percentage", DefaultValue = 1, MinValue = 0, MaxValue = 100, Group = "Stoploss Settings")]
+        public double GlobalSLPercentage { get; set; }
+
+        [Parameter("SL Distance (Pips)", DefaultValue = 50, Group = "Stoploss Settings", MinValue = 1)]
+        public int SLDistance { get; set; }
+
+        [Parameter("Enable Daily Loss Limit", DefaultValue = true, Group = "Stoploss Settings")]
+        public bool EnableDailyLossLimit { get; set; }
+
+        [Parameter("Daily Loss Limit Percentage", DefaultValue = 2, Group = "Stoploss Settings", MinValue = 0, MaxValue = 100)]
+        public double DailyLossLimitPercentage { get; set; }
+
+        [Parameter("TP Type", DefaultValue = TPType.Pips, Group = "TakeProfit Settings")]
+        public TPType TakeProfitType { get; set; }
+
+        [Parameter("TP Distance (Pips)", DefaultValue = 50, Group = "TakeProfit Settings", MinValue = 0)]
+        public int TPDistancePips { get; set; }
+
+        [Parameter("TP Amount in $", DefaultValue = 100, Group = "TakeProfit Settings", MinValue = 0)]
+        public double TPAmount { get; set; }
+
+        [Parameter("TP Based on Total Profit", DefaultValue = false, Group = "TakeProfit Settings")]
+        public bool TPBasedOnTotalProfit { get; set; }
+
+        [Parameter("Use Inner Timeframe MA", DefaultValue = false, Group = "MA Settings")]
+        public bool UseInnerTimeframeMA { get; set; }
+
+        [Parameter("Inner Timeframe", DefaultValue = InnerTimeframeOptions.H1, Group = "MA Settings")]
+        public InnerTimeframeOptions InnerTimeframe { get; set; }
+
+        [Parameter("Inner Timeframe Short Period", DefaultValue = 33, Group = "MA Settings", MinValue = 1)]
+        public int InnerTimeframeShortPeriod { get; set; }
+
+        [Parameter("Inner Timeframe Long Period", DefaultValue = 144, Group = "MA Settings", MinValue = 1)]
+        public int InnerTimeframeLongPeriod { get; set; }
+
+        [Parameter("Inner Timeframe Short MA Type", DefaultValue = MovingAverageType.WWS, Group = "MA Settings")]
+        public MovingAverageType InnerTimeframeShortMAType { get; set; }
+
+        [Parameter("Inner Timeframe Long MA Type", DefaultValue = MovingAverageType.WWS, Group = "MA Settings")]
+        public MovingAverageType InnerTimeframeLongMAType { get; set; }
+
+        [Parameter("Panel Horizontal Position", DefaultValue = PanelHorizontalPosition.Left, Group = "Panel Settings")]
+        public PanelHorizontalPosition PanelHorizontalPosition { get; set; }
+
+        [Parameter("Panel Vertical Position", DefaultValue = PanelVerticalPosition.Top, Group = "Panel Settings")]
+        public PanelVerticalPosition PanelVerticalPosition { get; set; }
+
+        [Parameter("Panel Size", DefaultValue = PanelSize.Small, Group = "Panel Settings")]
+        public PanelSize PanelSize { get; set; }
+
+        [Parameter("Panel Background Color", DefaultValue = "Black", Group = "Panel Settings")]
+        public string PanelBackgroundColor { get; set; }
+
+        [Parameter("Panel Opacity", DefaultValue = 0.7, Group = "Panel Settings", MinValue = 0.0, MaxValue = 1.0)]
+        public double PanelOpacity { get; set; }
+
+        private MovingAverage _shortMA;
+        private MovingAverage _longMA;
+        private MovingAverage _trailingStopMA;
+        private MovingAverage _innerShortMA;
+        private MovingAverage _innerLongMA;
+        private AwesomeOscillator _ao;
+        private MacdCrossOver _macd;
+        private RelativeStrengthIndex _rsi;
+        private double _initialBalance;
+        private DateTime _lastTradeTime;
+        private double _dailyLossLimit;
+        private double _startingDayBalance;
+        private string _logFilePath;
+        private DateTime _currentDay;
+        private bool _globalStopLossTriggered;
+
+        private StackPanel _panel;
+        private TextBlock _profitText;
+        private Button _buyButton;
+        private Button _sellButton;
+        private Button _closeAllButton;
+        private Button _closeBuyButton;
+        private Button _closeSellButton;
+        private TextBox _positionSizeTextBox;
+        private TextBox _tpTextBox;
+        private TextBox _slTextBox;
+        private TextBlock _aoText;
+        private TextBlock _macdText;
+        private TextBlock _rsiText;
+
+        protected override void OnStart()
+        {
+            try
+            {
+                InitializeIndicators();
+
+                _initialBalance = Account.Balance;
+                _startingDayBalance = _initialBalance;
+                _dailyLossLimit = _initialBalance * (DailyLossLimitPercentage / 100);
+                _lastTradeTime = DateTime.MinValue;
+                _currentDay = Server.Time.Date;
+                _globalStopLossTriggered = false;
+
+                _logFilePath = GetLogFilePath();
+                Log("Bot uruchomiony.");
+
+                ValidateParameters();
+                CreateControlPanel();
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas uruchamiania bota", ex);
+            }
+        }
+
+        private void CreateControlPanel()
+        {
+            SetPanelSize(out int panelWidth, out int panelHeight);
+
+            _panel = new StackPanel
+            {
+                Width = panelWidth,
+                Height = panelHeight,
+                BackgroundColor = PanelBackgroundColor,
+                Opacity = PanelOpacity,
+                Orientation = Orientation.Vertical,
+                VerticalAlignment = GetVerticalAlignment(PanelVerticalPosition),
+                HorizontalAlignment = GetHorizontalAlignment(PanelHorizontalPosition),
+                Margin = new Thickness(0, 0, 0, 30) // Dodanie marginesu na dole
+            };
+
+            _panel.AddChild(new TextBlock
+            {
+                Text = " HTS Manager ",
+                ForegroundColor = "White",
+                FontSize = 12,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(2)
+            });
+
+            _panel.AddChild(new TextBlock { Text = "Position Size (Lots)", ForegroundColor = "White", Margin = new Thickness(2) });
+            _positionSizeTextBox = new TextBox
+            {
+                Text = PositionSizeShortMA.ToString(),
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _panel.AddChild(_positionSizeTextBox);
+
+            _panel.AddChild(new TextBlock { Text = "Take Profit (Pips)", ForegroundColor = "White", Margin = new Thickness(2) });
+            _tpTextBox = new TextBox
+            {
+                Text = TPDistancePips.ToString(),
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _panel.AddChild(_tpTextBox);
+
+            _panel.AddChild(new TextBlock { Text = "Stop Loss (Pips)", ForegroundColor = "White", Margin = new Thickness(2) });
+            _slTextBox = new TextBox
+            {
+                Text = SLDistance.ToString(),
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _panel.AddChild(_slTextBox);
+
+            _profitText = new TextBlock
+            {
+                Text = "Profit: 0",
+                ForegroundColor = "White",
+                Margin = new Thickness(2),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            _panel.AddChild(_profitText);
+
+            var indicatorsPanel1 = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(2)
+            };
+
+            var indicatorsPanel2 = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Margin = new Thickness(2)
+            };
+
+            if (UseAOFilter)
+            {
+                _aoText = new TextBlock
+                {
+                    Text = "AO: ",
+                    ForegroundColor = "White",
+                    Margin = new Thickness(2),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                indicatorsPanel1.AddChild(_aoText);
+            }
+
+            if (UseMACDFilter)
+            {
+                _macdText = new TextBlock
+                {
+                    Text = "MACD: ",
+                    ForegroundColor = "White",
+                    Margin = new Thickness(2),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                indicatorsPanel1.AddChild(_macdText);
+            }
+
+            if (UseRSIFilter)
+            {
+                _rsiText = new TextBlock
+                {
+                    Text = "RSI: ",
+                    ForegroundColor = "White",
+                    Margin = new Thickness(2),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                indicatorsPanel2.AddChild(_rsiText);
+            }
+
+            _panel.AddChild(indicatorsPanel1);
+            _panel.AddChild(indicatorsPanel2);
+
+            _buyButton = new Button
+            {
+                Text = "BUY",
+                BackgroundColor = "Green",
+                ForegroundColor = "White",
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _buyButton.Click += BuyButtonClicked;
+            _panel.AddChild(_buyButton);
+
+            _closeBuyButton = new Button
+            {
+                Text = "Close Long",
+                BackgroundColor = "DarkGreen",
+                ForegroundColor = "White",
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _closeBuyButton.Click += CloseBuyButtonClicked;
+            _panel.AddChild(_closeBuyButton);
+
+            _sellButton = new Button
+            {
+                Text = "SELL",
+                BackgroundColor = "Red",
+                ForegroundColor = "White",
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _sellButton.Click += SellButtonClicked;
+            _panel.AddChild(_sellButton);
+
+            _closeSellButton = new Button
+            {
+                Text = "Close Short",
+                BackgroundColor = "DarkRed",
+                ForegroundColor = "White",
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _closeSellButton.Click += CloseSellButtonClicked;
+            _panel.AddChild(_closeSellButton);
+
+            _closeAllButton = new Button
+            {
+                Text = "CLOSE ALL",
+                BackgroundColor = "DarkGray",
+                ForegroundColor = "White",
+                Margin = new Thickness(2),
+                Width = panelWidth - 4
+            };
+            _closeAllButton.Click += CloseAllButtonClicked;
+            _panel.AddChild(_closeAllButton);
+
+            Chart.AddControl(_panel);
+        }
+
+        private void SetPanelSize(out int width, out int height)
+        {
+            switch (PanelSize)
+            {
+                case PanelSize.Tiny:
+                    width = 150;
+                    height = 300;
+                    break;
+                case PanelSize.Small:
+                    width = 200;
+                    height = 400;
+                    break;
+                case PanelSize.Normal:
+                    width = 300;
+                    height = 500;
+                    break;
+                case PanelSize.Large:
+                    width = 400;
+                    height = 600;
+                    break;
+                default:
+                    width = 200;
+                    height = 400;
+                    break;
+            }
+        }
+
+        private void BuyButtonClicked(ButtonClickEventArgs e)
+        {
+            double positionSize = double.Parse(_positionSizeTextBox.Text);
+            double tpDistance = double.Parse(_tpTextBox.Text);
+            double slDistance = double.Parse(_slTextBox.Text);
+
+            ExecuteMarketOrder(TradeType.Buy, SymbolName, Symbol.QuantityToVolumeInUnits(positionSize), "ManualBuy", slDistance, tpDistance, null);
+        }
+
+        private void SellButtonClicked(ButtonClickEventArgs e)
+        {
+            double positionSize = double.Parse(_positionSizeTextBox.Text);
+            double tpDistance = double.Parse(_tpTextBox.Text);
+            double slDistance = double.Parse(_slTextBox.Text);
+
+            ExecuteMarketOrder(TradeType.Sell, SymbolName, Symbol.QuantityToVolumeInUnits(positionSize), "ManualSell", slDistance, tpDistance, null);
+        }
+
+        private void CloseBuyButtonClicked(ButtonClickEventArgs e)
+        {
+            var buyPositions = Positions.Where(p => p.TradeType == TradeType.Buy && p.SymbolName == SymbolName);
+            foreach (var position in buyPositions)
+            {
+                ClosePosition(position);
+            }
+        }
+
+        private void CloseSellButtonClicked(ButtonClickEventArgs e)
+        {
+            var sellPositions = Positions.Where(p => p.TradeType == TradeType.Sell && p.SymbolName == SymbolName);
+            foreach (var position in sellPositions)
+            {
+                ClosePosition(position);
+            }
+        }
+
+        private void CloseAllButtonClicked(ButtonClickEventArgs e)
+        {
+            CloseAllPositions();
+        }
+
+        private void InitializeIndicators()
+        {
+            _shortMA = CreateMovingAverage(ShortPeriod, ShortPeriodMAType);
+            _longMA = CreateMovingAverage(LongPeriod, LongPeriodMAType);
+            _trailingStopMA = CreateMovingAverage(TrailingStopMAPeriod, TrailingStopMAType);
+
+            if (UseInnerTimeframeMA)
+            {
+                _innerShortMA = CreateInnerTimeframeMovingAverage(InnerTimeframeShortPeriod, InnerTimeframeShortMAType, InnerTimeframe);
+                _innerLongMA = CreateInnerTimeframeMovingAverage(InnerTimeframeLongPeriod, InnerTimeframeLongMAType, InnerTimeframe);
+            }
+
+            _ao = Indicators.AwesomeOscillator();
+            _macd = Indicators.MacdCrossOver(MACDFastPeriod, MACDSlowPeriod, MACDSignalPeriod);
+            _rsi = Indicators.RelativeStrengthIndex(Bars.ClosePrices, RSIPeriod);
+        }
+
+        private MovingAverage CreateMovingAverage(int period, MovingAverageType type)
+        {
+            return type switch
+            {
+                MovingAverageType.EMA => Indicators.ExponentialMovingAverage(Bars.ClosePrices, period),
+                MovingAverageType.WWS => Indicators.WellesWilderSmoothing(Bars.ClosePrices, period),
+                MovingAverageType.HMA => Indicators.HullMovingAverage(Bars.ClosePrices, period),
+                MovingAverageType.SMA => Indicators.SimpleMovingAverage(Bars.ClosePrices, period),
+                MovingAverageType.TMA => Indicators.TriangularMovingAverage(Bars.ClosePrices, period),
+                MovingAverageType.WMA => Indicators.WeightedMovingAverage(Bars.ClosePrices, period),
+                _ => throw new ArgumentException("Nieprawidłowy typ średniej kroczącej"),
+            };
+        }
+
+        private MovingAverage CreateInnerTimeframeMovingAverage(int period, MovingAverageType type, InnerTimeframeOptions timeframe)
+        {
+            var innerTimeframeBars = MarketData.GetBars(GetTimeFrameFromOptions(timeframe));
+            return type switch
+            {
+                MovingAverageType.EMA => Indicators.ExponentialMovingAverage(innerTimeframeBars.ClosePrices, period),
+                MovingAverageType.WWS => Indicators.WellesWilderSmoothing(innerTimeframeBars.ClosePrices, period),
+                MovingAverageType.HMA => Indicators.HullMovingAverage(innerTimeframeBars.ClosePrices, period),
+                MovingAverageType.SMA => Indicators.SimpleMovingAverage(innerTimeframeBars.ClosePrices, period),
+                MovingAverageType.TMA => Indicators.TriangularMovingAverage(innerTimeframeBars.ClosePrices, period),
+                MovingAverageType.WMA => Indicators.WeightedMovingAverage(innerTimeframeBars.ClosePrices, period),
+                _ => throw new ArgumentException("Nieprawidłowy typ średniej kroczącej"),
+            };
+        }
+
+        private TimeFrame GetTimeFrameFromOptions(InnerTimeframeOptions timeframe)
+        {
+            return timeframe switch
+            {
+                InnerTimeframeOptions.M1 => TimeFrame.Minute,
+                InnerTimeframeOptions.M5 => TimeFrame.Minute5,
+                InnerTimeframeOptions.M15 => TimeFrame.Minute15,
+                InnerTimeframeOptions.M30 => TimeFrame.Minute30,
+                InnerTimeframeOptions.H1 => TimeFrame.Hour,
+                InnerTimeframeOptions.H4 => TimeFrame.Hour4,
+                InnerTimeframeOptions.D1 => TimeFrame.Daily,
+                InnerTimeframeOptions.W1 => TimeFrame.Weekly,
+                _ => throw new ArgumentException("Nieprawidłowy TimeFrame"),
+            };
+        }
+
+        private void ValidateParameters()
+        {
+            if (ShortPeriod <= 0 || LongPeriod <= 0 || TrailingStopMAPeriod <= 0)
+                throw new ArgumentException("Okresy MA muszą być dodatnimi liczbami całkowitymi.");
+
+            if (RSIOverboughtLevel <= RSIOversoldLevel)
+                throw new ArgumentException("Poziom wykupienia RSI musi być większy od poziomu wyprzedania RSI.");
+
+            if (CoolDownPeriod <= 0)
+                throw new ArgumentException("CoolDownPeriod musi być dodatnią liczbą całkowitą.");
+
+            if (TrailingStopDistance <= 0 || TrailingStopMADistance <= 0 || SLDistance <= 0 || TPDistancePips <= 0)
+                throw new ArgumentException("Parametry odległości muszą być dodatnimi liczbami całkowitymi.");
+        }
+
+        protected override void OnTick()
+        {
+            try
+            {
+                if (Server.Time.Date != _currentDay)
+                {
+                    _currentDay = Server.Time.Date;
+                    ResetDailyVariables();
+                }
+
+                if (!CanOpenPosition())
+                    return;
+
+                if (EnableDailyLossLimit && HasReachedDailyLossLimit())
+                    return;
+
+                double shortMAValue = _shortMA.Result.LastValue;
+                double longMAValue = _longMA.Result.LastValue;
+                var price = Bars.ClosePrices.LastValue;
+                var aoCurrent = _ao.Result.LastValue;
+                var aoPrevious = _ao.Result.Last(1);
+                var macdHistogram = _macd.Histogram.LastValue;
+                var rsiValue = _rsi.Result.LastValue;
+
+                bool aoConditionLong = !UseAOFilter || (aoCurrent > aoPrevious);
+                bool aoConditionShort = !UseAOFilter || (aoCurrent < aoPrevious);
+
+                if (AOMustBeAboveBelowZero)
+                {
+                    aoConditionLong = aoConditionLong && aoCurrent > 0;
+                    aoConditionShort = aoConditionShort && aoCurrent < 0;
+                }
+
+                bool macdConditionLong = !UseMACDFilter || (macdHistogram > 0);
+                bool macdConditionShort = !UseMACDFilter || (macdHistogram < 0);
+
+                bool rsiConditionLong = !UseRSIFilter || (rsiValue < RSIOversoldLevel);
+                bool rsiConditionShort = !UseRSIFilter || (rsiValue > RSIOverboughtLevel);
+
+                bool innerTimeframeConditionLong = true;
+                bool innerTimeframeConditionShort = true;
+
+                if (UseInnerTimeframeMA)
+                {
+                    var innerShortMAValue = _innerShortMA.Result.LastValue;
+                    var innerLongMAValue = _innerLongMA.Result.LastValue;
+
+                    innerTimeframeConditionLong = innerShortMAValue > innerLongMAValue;
+                    innerTimeframeConditionShort = innerShortMAValue < innerLongMAValue;
+                }
+
+                Log($"OnTick: shortMA={shortMAValue}, longMA={longMAValue}, price={price}");
+
+                if (shortMAValue > longMAValue && innerTimeframeConditionLong)
+                {
+                    if (price > shortMAValue && price <= shortMAValue + DistanceFromShortMAToOpen * Symbol.PipSize)
+                    {
+                        if (aoConditionLong && macdConditionLong && rsiConditionLong && Positions.Count(p => p.Label == LabelPrefix + "ShortMA") < MaxPositionsShortMA)
+                        {
+                            OpenPosition(TradeType.Buy, LabelPrefix + "ShortMA", price, PositionSizeShortMA);
+                        }
+                    }
+
+                    if (price > longMAValue && price <= longMAValue + DistanceFromLongMAToOpen * Symbol.PipSize)
+                    {
+                        if (aoConditionLong && macdConditionLong && rsiConditionLong && Positions.Count(p => p.Label == LabelPrefix + "LongMA") < MaxPositionsLongMA)
+                        {
+                            OpenPosition(TradeType.Buy, LabelPrefix + "LongMA", price, PositionSizeLongMA);
+                        }
+                    }
+                }
+                else if (shortMAValue < longMAValue && innerTimeframeConditionShort)
+                {
+                    if (price < shortMAValue && price >= shortMAValue - DistanceFromShortMAToOpen * Symbol.PipSize)
+                    {
+                        if (aoConditionShort && macdConditionShort && rsiConditionShort && Positions.Count(p => p.Label == LabelPrefix + "ShortMA") < MaxPositionsShortMA)
+                        {
+                            OpenPosition(TradeType.Sell, LabelPrefix + "ShortMA", price, PositionSizeShortMA);
+                        }
+                    }
+
+                    if (price < longMAValue && price >= longMAValue - DistanceFromLongMAToOpen * Symbol.PipSize)
+                    {
+                        if (aoConditionShort && macdConditionShort && rsiConditionShort && Positions.Count(p => p.Label == LabelPrefix + "LongMA") < MaxPositionsLongMA)
+                        {
+                            OpenPosition(TradeType.Sell, LabelPrefix + "LongMA", price, PositionSizeLongMA);
+                        }
+                    }
+                }
+
+                CheckGlobalStopLoss();
+                SetTakeProfit();
+
+                if (EnableTrailingStop)
+                {
+                    SetTrailingStop();
+                }
+                else if (MoveSLToBE)
+                {
+                    SetBreakEvenStop();
+                }
+
+                UpdateProfitText(); // Update profit text during trading time
+                UpdateIndicatorStates(); // Update indicator states on each tick
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas przetwarzania ticku", ex);
+            }
+        }
+
+        private void UpdateProfitText()
+        {
+            double profit = Account.Equity - _initialBalance;
+            string profitText = $"Profit: {profit:F2} $";
+            _profitText.Text = profitText;
+        }
+
+        private void UpdateIndicatorStates()
+        {
+            if (UseAOFilter)
+            {
+                var aoCurrent = _ao.Result.LastValue;
+                _aoText.Text = $"AO: {aoCurrent:F2}";
+                _aoText.ForegroundColor = aoCurrent > _ao.Result.Last(1) ? "Green" : "Red";
+            }
+
+            if (UseMACDFilter)
+            {
+                var macdHistogram = _macd.Histogram.LastValue;
+                _macdText.Text = $"MACD: {macdHistogram:F2}";
+                _macdText.ForegroundColor = macdHistogram > 0 ? "Green" : "Red"; // Kolor oparty na wartości histogramu MACD
+            }
+
+            if (UseRSIFilter)
+            {
+                var rsiValue = _rsi.Result.LastValue;
+                _rsiText.Text = $"RSI: {rsiValue:F2}";
+                _rsiText.ForegroundColor = rsiValue > _rsi.Result.Last(1) ? "Green" : "Red";
+            }
+        }
+
+        private void ResetDailyVariables()
+        {
+            _startingDayBalance = Account.Balance;
+            _dailyLossLimit = _startingDayBalance * (DailyLossLimitPercentage / 100);
+            _lastTradeTime = DateTime.MinValue;
+            _globalStopLossTriggered = false;
+            Log($"Resetowanie zmiennych dziennych: _dailyLossLimit={_dailyLossLimit}, _lastTradeTime={_lastTradeTime}");
+        }
+
+        private bool CanOpenPosition()
+        {
+            var canOpen = (DateTime.UtcNow - _lastTradeTime).TotalSeconds >= CoolDownPeriod;
+            Log($"CanOpenPosition: canOpen={canOpen}, lastTradeTime={_lastTradeTime}, currentTime={DateTime.UtcNow}");
+            return canOpen;
+        }
+
+        private void OpenPosition(TradeType tradeType, string label, double price, double positionSize)
+        {
+            try
+            {
+                var volume = Symbol.QuantityToVolumeInUnits(positionSize);
+                var stopLossPrice = tradeType == TradeType.Buy ? price - SLDistance * Symbol.PipSize : price + SLDistance * Symbol.PipSize;
+
+                Log($"Otwieram pozycję {tradeType} na {label} przy cenie {price} z wolumenem {volume} i SL {stopLossPrice}");
+
+                var result = ExecuteMarketOrder(tradeType, SymbolName, volume, label, stopLossPrice, 0);
+
+                if (result.IsSuccessful)
+                {
+                    _lastTradeTime = DateTime.UtcNow;
+                    Log($"Pozycja {tradeType} otwarta na {label} przy cenie {price} z wolumenem {volume} i SL {stopLossPrice}");
+
+                    if (result.Position.StopLoss != stopLossPrice)
+                    {
+                        Log($"Ustawienie SL ręcznie dla pozycji {result.Position.Id}");
+                        ModifyPosition(result.Position, stopLossPrice, result.Position.TakeProfit);
+                    }
+                }
+                else
+                {
+                    Log($"Nie udało się otworzyć pozycji {tradeType} na {label} przy cenie {price} z wolumenem {volume} i SL {stopLossPrice}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas otwierania pozycji", ex);
+            }
+        }
+
+        private bool HasReachedDailyLossLimit()
+        {
+            try
+            {
+                var currentEquity = Account.Balance + Account.UnrealizedNetProfit;
+                if (_startingDayBalance - currentEquity >= _dailyLossLimit)
+                {
+                    CloseAllPositions();
+                    Log("Limit dziennej straty osiągnięty. Wszystkie pozycje zostały zamknięte.");
+                    return true;
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas sprawdzania limitu dziennej straty", ex);
+                return false;
+            }
+        }
+
+        private void CheckGlobalStopLoss()
+        {
+            try
+            {
+                if (_globalStopLossTriggered)
+                    return;
+
+                var maxLoss = _initialBalance * (GlobalSLPercentage / 100);
+                var currentEquity = Account.Balance + Account.UnrealizedNetProfit;
+                if (_initialBalance - currentEquity >= maxLoss)
+                {
+                    Log("Globalny stop loss osiągnięty. Zamykanie wszystkich pozycji.");
+                    CloseAllPositions();
+                    _globalStopLossTriggered = true;
+                    Log("Wszystkie pozycje zostały zamknięte przez globalny stop loss.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas sprawdzania globalnego stop loss", ex);
+            }
+        }
+
+        private void SetTakeProfit()
+        {
+            try
+            {
+                if (TakeProfitType == TPType.Dollar && TPBasedOnTotalProfit)
+                {
+                    double totalProfit = Positions.Where(p => p.SymbolName == SymbolName).Sum(p => p.GrossProfit);
+
+                    if (totalProfit >= TPAmount)
+                    {
+                        CloseAllPositions();
+                        Log($"Wszystkie pozycje zamknięte po osiągnięciu TP w dolarach: {TPAmount}");
+                        return;
+                    }
+                }
+
+                foreach (var position in Positions)
+                {
+                    if (position.SymbolName == SymbolName)
+                    {
+                        switch (TakeProfitType)
+                        {
+                            case TPType.Pips:
+                                SetTakeProfitPips(position);
+                                break;
+                            case TPType.Dollar:
+                                if (!TPBasedOnTotalProfit)
+                                {
+                                    SetTakeProfitDollar(position);
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas ustawiania take profit", ex);
+            }
+        }
+
+        private void SetTakeProfitPips(Position position)
+        {
+            try
+            {
+                double takeProfitPrice = position.EntryPrice + (position.TradeType == TradeType.Buy ? TPDistancePips : -TPDistancePips) * Symbol.PipSize;
+
+                if ((position.TradeType == TradeType.Buy && Symbol.Bid >= takeProfitPrice) ||
+                    (position.TradeType == TradeType.Sell && Symbol.Ask <= takeProfitPrice))
+                {
+                    ClosePosition(position);
+                    Log($"Pozycja zamknięta na poziomie TP w pipsach: {takeProfitPrice}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas ustawiania TP w pipsach", ex);
+            }
+        }
+
+        private void SetTakeProfitDollar(Position position)
+        {
+            try
+            {
+                double currentProfit = position.GrossProfit;
+                if (currentProfit >= TPAmount)
+                {
+                    ClosePosition(position);
+                    Log($"Pozycja zamknięta na poziomie TP w dolarach: {TPAmount}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas ustawiania TP w dolarach", ex);
+            }
+        }
+
+        private void SetTrailingStop()
+        {
+            try
+            {
+                foreach (var position in Positions)
+                {
+                    if (position.SymbolName == SymbolName)
+                    {
+                        if (TrailingStopType == TrailingStopType.FixedDistance)
+                        {
+                            SetFixedDistanceTrailingStop(position);
+                        }
+                        else if (TrailingStopType == TrailingStopType.MovingAverage)
+                        {
+                            SetMovingAverageTrailingStop(position);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas ustawiania trailing stop", ex);
+            }
+        }
+
+        private void SetFixedDistanceTrailingStop(Position position)
+        {
+            try
+            {
+                double distance = 0;
+                double newStopLossPrice = 0;
+                double initialStopLoss = position.EntryPrice + (position.TradeType == TradeType.Buy ? -SLDistance : SLDistance) * Symbol.PipSize;
+
+                if (position.TradeType == TradeType.Buy)
+                {
+                    distance = Symbol.Bid - position.EntryPrice;
+
+                    if (distance >= TrailingStopDistance * Symbol.PipSize)
+                    {
+                        newStopLossPrice = Symbol.Bid - TrailingStopDistance * Symbol.PipSize;
+
+                        if (newStopLossPrice > position.StopLoss || position.StopLoss == null)
+                        {
+                            ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                            Log($"Trailing stop dostosowany dla pozycji BUY do {newStopLossPrice}");
+                        }
+                    }
+                    else if (position.StopLoss == null || position.StopLoss < initialStopLoss)
+                    {
+                        ModifyPosition(position, initialStopLoss, position.TakeProfit);
+                        Log($"Początkowy stop loss ustawiony dla pozycji BUY do {initialStopLoss}");
+                    }
+                }
+                else if (position.TradeType == TradeType.Sell)
+                {
+                    distance = position.EntryPrice - Symbol.Ask;
+
+                    if (distance >= TrailingStopDistance * Symbol.PipSize)
+                    {
+                        newStopLossPrice = Symbol.Ask + TrailingStopDistance * Symbol.PipSize;
+
+                        if (newStopLossPrice < position.StopLoss || position.StopLoss == null)
+                        {
+                            ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                            Log($"Trailing stop dostosowany dla pozycji SELL do {newStopLossPrice}");
+                        }
+                    }
+                    else if (position.StopLoss == null || position.StopLoss > initialStopLoss)
+                    {
+                        ModifyPosition(position, initialStopLoss, position.TakeProfit);
+                        Log($"Początkowy stop loss ustawiony dla pozycji SELL do {initialStopLoss}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas ustawiania trailing stop na stałą odległość", ex);
+            }
+        }
+
+        private void SetMovingAverageTrailingStop(Position position)
+        {
+            try
+            {
+                double maValue = _trailingStopMA.Result.LastValue;
+                double newStopLossPrice = 0;
+                double initialStopLoss = position.EntryPrice + (position.TradeType == TradeType.Buy ? -SLDistance : SLDistance) * Symbol.PipSize;
+
+                if (position.TradeType == TradeType.Buy)
+                {
+                    if (Symbol.Bid - position.EntryPrice >= TrailingStopDistance * Symbol.PipSize && Symbol.Bid > position.EntryPrice)
+                    {
+                        newStopLossPrice = maValue - TrailingStopMADistance * Symbol.PipSize;
+
+                        if (newStopLossPrice > position.StopLoss || position.StopLoss == null)
+                        {
+                            ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                            Log($"Trailing stop dostosowany do MA dla pozycji BUY do {newStopLossPrice}");
+                        }
+                    }
+                    else if (position.StopLoss == null || position.StopLoss < initialStopLoss)
+                    {
+                        ModifyPosition(position, initialStopLoss, position.TakeProfit);
+                        Log($"Początkowy stop loss ustawiony dla pozycji BUY do {initialStopLoss}");
+                    }
+                }
+                else if (position.TradeType == TradeType.Sell)
+                {
+                    if (position.EntryPrice - Symbol.Ask >= TrailingStopDistance * Symbol.PipSize && Symbol.Ask < position.EntryPrice)
+                    {
+                        newStopLossPrice = maValue + TrailingStopMADistance * Symbol.PipSize;
+
+                        if (newStopLossPrice < position.StopLoss || position.StopLoss == null)
+                        {
+                            ModifyPosition(position, newStopLossPrice, position.TakeProfit);
+                            Log($"Trailing stop dostosowany do MA dla pozycji SELL do {newStopLossPrice}");
+                        }
+                    }
+                    else if (position.StopLoss == null || position.StopLoss > initialStopLoss)
+                    {
+                        ModifyPosition(position, initialStopLoss, position.TakeProfit);
+                        Log($"Początkowy stop loss ustawiony dla pozycji SELL do {initialStopLoss}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas ustawiania trailing stop na średnią kroczącą", ex);
+            }
+        }
+
+        private void SetBreakEvenStop()
+        {
+            try
+            {
+                foreach (var position in Positions)
+                {
+                    if (position.SymbolName == SymbolName)
+                    {
+                        double distance = 0;
+                        if (position.TradeType == TradeType.Buy)
+                        {
+                            distance = Symbol.Bid - position.EntryPrice;
+                            if (distance >= DistanceToMoveSLToBE * Symbol.PipSize)
+                            {
+                                double breakEvenPrice = position.EntryPrice + Symbol.PipSize * 2;
+                                ModifyPosition(position, breakEvenPrice, position.TakeProfit);
+                                Log($"SL przesunięty do BE+ dla pozycji BUY na poziomie {breakEvenPrice}");
+                            }
+                        }
+                        else if (position.TradeType == TradeType.Sell)
+                        {
+                            distance = position.EntryPrice - Symbol.Ask;
+                            if (distance >= DistanceToMoveSLToBE * Symbol.PipSize)
+                            {
+                                double breakEvenPrice = position.EntryPrice - Symbol.PipSize * 2;
+                                ModifyPosition(position, breakEvenPrice, position.TakeProfit);
+                                Log($"SL przesunięty do BE+ dla pozycji SELL na poziomie {breakEvenPrice}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas ustawiania stop na poziomie BE", ex);
+            }
+        }
+
+        private void CloseAllPositions()
+        {
+            try
+            {
+                foreach (var position in Positions)
+                {
+                    if (position.SymbolName == SymbolName)
+                    {
+                        Log($"Zamykanie pozycji: {position.Label}");
+                        ClosePosition(position);
+                        Log($"Pozycja zamknięta: {position.Label}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas zamykania wszystkich pozycji", ex);
+            }
+        }
+
+        private void ManageExistingPositions()
+        {
+            try
+            {
+                SetTakeProfit();
+
+                if (EnableTrailingStop)
+                {
+                    SetTrailingStop();
+                }
+                else if (MoveSLToBE)
+                {
+                    SetBreakEvenStop();
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError("Błąd podczas zarządzania istniejącymi pozycjami", ex);
+            }
+        }
+
+        private string GetLogFilePath()
+        {
+            string directoryPath = "TrendFollowerLogs";
+            if (!System.IO.Directory.Exists(directoryPath))
+            {
+                System.IO.Directory.CreateDirectory(directoryPath);
+            }
+
+            string logFileName = $"TrendFollowerLog_{Server.Time:yyyyMMdd}.txt";
+            string logFilePath = System.IO.Path.Combine(directoryPath, logFileName);
+
+            DeleteOldLogFiles(directoryPath, 7);
+
+            return logFilePath;
+        }
+
+        private void DeleteOldLogFiles(string directoryPath, int daysToKeep)
+        {
+            try
+            {
+                var directoryInfo = new System.IO.DirectoryInfo(directoryPath);
+                var oldFiles = directoryInfo.GetFiles()
+                                            .Where(file => file.CreationTime < DateTime.Now.AddDays(-daysToKeep));
+
+                foreach (var file in oldFiles)
+                {
+                    file.Delete();
+                }
+            }
+            catch (Exception ex)
+            {
+                Print($"Błąd podczas usuwania starych plików logów: {ex.Message}");
+            }
+        }
+
+        private void Log(string message, [CallerMemberName] string caller = null)
+        {
+            Print($"{DateTime.Now} [{caller}]: {message}");
+            try
+            {
+                System.IO.File.AppendAllText(_logFilePath, $"{DateTime.Now} [{caller}]: {message}\n");
+            }
+            catch (Exception ex)
+            {
+                Print($"Nie udało się zapisać do pliku logu: {ex.Message}");
+            }
+        }
+
+        private void LogError(string message, Exception ex, [CallerMemberName] string caller = null)
+        {
+            string errorMessage = $"{DateTime.Now} [{caller}]: {message} - {ex.Message}\nStack Trace: {ex.StackTrace}";
+            Print(errorMessage);
+            try
+            {
+                System.IO.File.AppendAllText(_logFilePath, errorMessage + "\n");
+            }
+            catch (Exception logEx)
+            {
+                Print($"Nie udało się zapisać do pliku logu: {logEx.Message}");
+            }
+        }
+
+        private VerticalAlignment GetVerticalAlignment(PanelVerticalPosition position)
+        {
+            return position switch
+            {
+                PanelVerticalPosition.Top => VerticalAlignment.Top,
+                PanelVerticalPosition.Middle => VerticalAlignment.Center,
+                PanelVerticalPosition.Bottom => VerticalAlignment.Bottom,
+                _ => VerticalAlignment.Top,
+            };
+        }
+
+        private HorizontalAlignment GetHorizontalAlignment(PanelHorizontalPosition position)
+        {
+            return position switch
+            {
+                PanelHorizontalPosition.Left => HorizontalAlignment.Left,
+                PanelHorizontalPosition.Center => HorizontalAlignment.Center,
+                PanelHorizontalPosition.Right => HorizontalAlignment.Right,
+                _ => HorizontalAlignment.Left,
+            };
+        }
+    }
+}
